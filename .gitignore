@@ -1,0 +1,25 @@
+# Dependencias
+node_modules/
+base-baileys-memory/node_modules/
+
+# Variables de entorno
+.env
+base-baileys-memory/.env
+
+# Sesión de WhatsApp
+base-baileys-memory/auth_info/
+base-baileys-memory/bot_sessions/
+
+# Logs
+*.log
+base-baileys-memory/logs/
+
+# QR y temporales
+*.qr.png
+base-baileys-memory/pdf/
+temp_*.pdf
+
+# Sistema
+.DS_Store
+Thumbs.db
+.atl/
