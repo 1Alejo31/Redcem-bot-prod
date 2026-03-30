@@ -3,7 +3,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason
 } = require("@whiskeysockets/baileys");
-const { obtenerCasosPendientes, gestionarNotificacion } = require('./consultas');
+const { obtenerCasosPendientes, gestionarNotificacion, buscarHojasVidaConIPS, updateStatusHojaVida } = require('./consultas');
 const P = require("pino");
 const fs = require("fs");
 const path = require("path");
@@ -96,34 +96,91 @@ async function enviarWhatsAppConReintentos(sock, jid, contenido, maxReintentos =
   return { success: false, error: 'Máximo de reintentos alcanzado' };
 }
 
+// Función para actualizar estado de hoja de vida con reintentos infinitos
+async function actualizarEstadoHojaVidaConReintentos(hojaVidaId, estado, detalle) {
+  let intento = 0;
+  while (true) {
+    intento++;
+    try {
+      const resultado = await updateStatusHojaVida(hojaVidaId, estado, detalle);
+      if (resultado.success) {
+        console.log(`✅ Estado actualizado correctamente para hoja de vida ${hojaVidaId} en intento ${intento}`);
+        return true;
+      } else {
+        console.log(`⚠️ Intento ${intento} - No se pudo actualizar estado de hoja de vida ${hojaVidaId}, reintentando en 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (error) {
+      console.log(`⚠️ Intento ${intento} - Error al actualizar estado de hoja de vida ${hojaVidaId}: ${error.message}, reintentando en 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
+// Función para gestionar notificación con reintentos infinitos
+async function gestionarNotificacionConReintentos(casoId) {
+  let intento = 0;
+  while (true) {
+    intento++;
+    try {
+      const resultado = await gestionarNotificacion(casoId);
+      if (resultado.success) {
+        console.log(`✅ Notificación gestionada correctamente para caso ${casoId} en intento ${intento}`);
+        return true;
+      } else {
+        console.log(`⚠️ Intento ${intento} - No se pudo gestionar notificación de caso ${casoId}, reintentando en 3s...`);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (error) {
+      console.log(`⚠️ Intento ${intento} - Error al gestionar notificación de caso ${casoId}: ${error.message}, reintentando en 3s...`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+}
+
 async function procesarContactos(sock) {
   while (true) {
+    // Reset de tracking cada 30 segundos (permite reenvíos)
+    const casosEnviadosEnEsteCiclo = new Set();
+    const hojasVidaEnviadasEnEsteCiclo = new Set();
+
     try {
+      // 1. Obtener casos pendientes (notificaciones con PDF)
       const casos = await obtenerCasosPendientes();
 
-      if (casos.length === 0) {
-        console.log("No hay casos pendientes, esperando 10 segundos...");
+      // 2. Obtener hojas de vida con IPS (recordatorios de citas)
+      const hojasVida = await buscarHojasVidaConIPS();
+
+      if (casos.length === 0 && hojasVida.length === 0) {
+        console.log("No hay casos ni hojas de vida pendientes, esperando 10 segundos...");
         await new Promise(r => setTimeout(r, 10000));
         continue;
       }
 
-      console.log(`Se encontraron ${casos.length} casos para notificar`);
+      console.log(`Se encontraron ${casos.length} casos y ${hojasVida.length} hojas de vida para procesar`);
 
+      // PROCESAR CASOS PENDIENTES (Notificaciones con PDF)
       for (const caso of casos) {
         if (!isProcessing) break;
+
+        const casoId = String(caso._id);
+        if (casosEnviadosEnEsteCiclo.has(casoId)) {
+          console.log(`Caso ${casoId} ya procesado en este ciclo, saltando...`);
+          continue;
+        }
 
         const telefonosArray = extraerTelefonos(caso.CELULAR);
         const todosLosTelefonos = [...new Set(telefonosArray)];
 
         if (todosLosTelefonos.length === 0 && !caso.CORREO) {
-          console.log(`Caso ID ${caso._id} no tiene telefono ni correo valido, saltando...`);
+          console.log(`Caso ID ${casoId} no tiene telefono ni correo valido, saltando...`);
           continue;
         }
 
         const { asunto, mensaje, ruta_documento_adjunto } = caso.notificacion;
         const pdfUrl = `http://3.16.114.54/api/pdf/recibida/${path.basename(ruta_documento_adjunto)}`;
         const pdfFileName = path.basename(ruta_documento_adjunto);
-        const tempPdfPath = path.resolve(__dirname, `temp_${caso._id}_${Date.now()}.pdf`);
+        const tempPdfPath = path.resolve(__dirname, `temp_${casoId}_${Date.now()}.pdf`);
 
         // Descargar PDF
         let pdfDescargado = false;
@@ -214,8 +271,155 @@ async function procesarContactos(sock) {
           console.log(`PDF temporal eliminado: ${pdfFileName}`);
         }
 
-        // Marcar notificacion como gestionada
-        await gestionarNotificacion(caso._id);
+        // Marcar notificacion como gestionada (esperar confirmación)
+        console.log(`⏳ Esperando confirmación de actualización de estado para caso ${casoId}...`);
+        await gestionarNotificacionConReintentos(casoId);
+        casosEnviadosEnEsteCiclo.add(casoId);
+
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // PROCESAR HOJAS DE VIDA CON IPS (Recordatorios de citas médicas)
+      for (const contacto of hojasVida) {
+        if (!isProcessing) break;
+
+        const hojaVidaId = String(contacto.ID);
+        if (hojasVidaEnviadasEnEsteCiclo.has(hojaVidaId)) {
+          console.log(`Hoja de vida ${hojaVidaId} ya procesada en este ciclo, saltando...`);
+          continue;
+        }
+
+        const telefonosArray = extraerTelefonos(contacto.TELEFONO);
+        const todosLosTelefonos = [...new Set(telefonosArray)];
+
+        if (todosLosTelefonos.length === 0 && !contacto.CORREO) {
+          console.log(`Hoja de vida ${hojaVidaId} no tiene teléfonos ni correos válidos, saltando...`);
+          continue;
+        }
+
+        // Contadores
+        let whatsappEnviados = 0;
+        let whatsappTotal = todosLosTelefonos.length;
+        let emailEnviados = 0;
+        let emailTotal = contacto.CORREO ? 1 : 0;
+
+        // Variables para el mensaje
+        const nombre = contacto.NOMBRE_PACIENTE || 'Estimado(a) paciente';
+        const tipo = contacto.TIPO || 'examen médico';
+        const examen = contacto.EXAMENES || 'exámenes médicos';
+        const empresa = contacto.NOMBRE_EMPRESA || 'su empresa';
+        const fechaAtencion_formateada = contacto.FECHA || 'fecha por confirmar';
+        const lugar = contacto.LUGAR || 'Centro Médico FELAIFEL';
+        const ciudad = contacto.CIUDAD || '';
+        const seccion_recomendaciones = contacto.RECOMENDACIONES ?
+          `📋 *Recomendaciones importantes:*\n${contacto.RECOMENDACIONES}\n` : '';
+
+        const message = `
+👋 Hola ${nombre}, somos REDCEM IA, su asistente virtual.
+
+🔬 *Recordatorio de cita médica*
+• Examen: ${examen}
+• Empresa: ${empresa}
+• Fecha: ${fechaAtencion_formateada}
+• Lugar: ${lugar} - ${ciudad}
+
+${seccion_recomendaciones}⏰ Agradecemos su puntualidad.`;
+
+        // Enviar WhatsApp
+        for (const numero of todosLosTelefonos) {
+          if (!isProcessing) break;
+          const telefono = numero.startsWith('57') ? numero : `57${numero}`;
+          const jid = `${telefono}@s.whatsapp.net`;
+
+          try {
+            // Enviar imagen con reintentos
+            const resultadoImagen = await enviarWhatsAppConReintentos(sock, jid, {
+              image: fs.readFileSync('assets/imagen.png'),
+              caption: 'REDCEM'
+            });
+
+            if (!resultadoImagen.success) {
+              console.error(`Error al enviar imagen a ${numero} después de reintentos:`, resultadoImagen.error);
+              continue;
+            }
+
+            if (!isProcessing) break;
+
+            // Enviar mensaje de texto con reintentos
+            const resultadoTexto = await enviarWhatsAppConReintentos(sock, jid, { text: message });
+
+            if (!resultadoTexto.success) {
+              console.error(`Error al enviar texto a ${numero} después de reintentos:`, resultadoTexto.error);
+              continue;
+            }
+
+            if (!isProcessing) break;
+
+            console.log(`WhatsApp enviado a ${numero} (intentos: txt=${resultadoTexto.intento})`);
+            whatsappEnviados++;
+          } catch (error) {
+            console.error(`Error general al enviar WhatsApp a ${numero}:`, error);
+          }
+
+          await new Promise(r => setTimeout(r, 5000));
+        }
+
+        // Enviar correos
+        const asunto = `REDCEM - Examen de ${contacto.TIPO} - ${contacto.NOMBRE_EMPRESA}`;
+        const adjuntos = [];
+
+        // Preparar correos de copia (CC)
+        const correosCC = [
+          contacto.CORREO_COPIA,
+          contacto.CORREO_COPIA_S,
+          contacto.CORREO_COPIA_T
+        ].filter(correo => correo && esCorreoValido(correo));
+
+        // Filtrar correo principal válido
+        const correosPrincipales = [contacto.CORREO].filter(correo => correo && esCorreoValido(correo));
+
+        if (correosPrincipales.length === 0) {
+          console.log(`Hoja de vida ${hojaVidaId}: No tiene correo principal válido`);
+        } else {
+          console.log(`Hoja de vida ${hojaVidaId}: Correo principal: ${correosPrincipales[0]}`);
+          if (correosCC.length > 0) {
+            console.log(`Hoja de vida ${hojaVidaId}: CC: ${correosCC.join(', ')}`);
+          }
+
+          for (const correo of correosPrincipales) {
+            try {
+              const resultado = await enviarCorreoConAdjuntos(
+                correo,
+                asunto,
+                message,
+                adjuntos,
+                correosCC.length > 0 ? correosCC : null
+              );
+
+              if (resultado.success) {
+                console.log(`Correo enviado a ${correo}`);
+                if (correosCC.length > 0) {
+                  console.log(`Con copia a: ${correosCC.join(', ')}`);
+                }
+                emailEnviados++;
+              } else {
+                console.error(`Error al enviar correo a ${correo}: ${resultado.error}`);
+              }
+            } catch (error) {
+              console.error(`Error inesperado al enviar correo a ${correo}:`, error.message);
+            }
+          }
+        }
+
+        // Guardar estado
+        const ahora = new Date();
+        const fechaHora = ahora.toISOString().replace('T', ' ').substring(0, 19);
+        const estadoDetalle = `PROCESADO_${fechaHora} - WhatsApp:${whatsappEnviados}/${whatsappTotal} Email:${emailEnviados}/${emailTotal}`;
+
+        // Actualizar estado usando el API (esperar confirmación)
+        console.log(`⏳ Esperando confirmación de actualización de estado para hoja de vida ${hojaVidaId}...`);
+        await actualizarEstadoHojaVidaConReintentos(hojaVidaId, 'EN GESTION', estadoDetalle);
+        hojasVidaEnviadasEnEsteCiclo.add(hojaVidaId);
 
         await new Promise(r => setTimeout(r, 2000));
       }
@@ -226,7 +430,8 @@ async function procesarContactos(sock) {
       console.error("Error en el proceso:", error);
     }
 
-    await new Promise(r => setTimeout(r, 25000));
+    // Esperar 30 segundos antes del siguiente ciclo (permite reenvíos)
+    await new Promise(r => setTimeout(r, 30000));
   }
 }
 
