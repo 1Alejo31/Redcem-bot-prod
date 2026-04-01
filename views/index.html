@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bot WhatsApp - Panel de Control</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="css/style.css">
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -82,7 +82,7 @@
 
         <!-- Panel QR (visible inicialmente) -->
         <div id="qr-panel" class="qr-panel">
-            <img id="qr-code" src="/qr" alt="Código QR">
+            <img id="qr-code" src="qr" alt="Código QR">
             <p>Escanea este código QR con WhatsApp</p>
         </div>
 
@@ -101,7 +101,7 @@
 
         async function checkStatus() {
             try {
-                const response = await fetch('/status')
+                const response = await fetch('status')
                 const data = await response.json()
 
                 console.log('Estado actual:', data)
@@ -135,7 +135,7 @@
             document.getElementById('qr-panel').style.display = 'none'
             document.getElementById('user-panel').style.display = 'block'
 
-            document.getElementById('user-avatar').src = '/profile-picture'
+            document.getElementById('user-avatar').src = 'profile-picture'
             document.getElementById('user-name').textContent = userData.name
             document.getElementById('user-phone').textContent = `+${userData.phone}`
             
@@ -160,13 +160,13 @@
 
         function refreshQR() {
             const qrImg = document.getElementById('qr-code')
-            qrImg.src = '/qr?' + new Date().getTime()
+            qrImg.src = 'qr?' + new Date().getTime()
         }
 
         function disconnect() {
             if (confirm('¿Estás seguro de que quieres desconectar?')) {
 
-                fetch('/disconnect', { method: 'POST' })
+                fetch('disconnect', { method: 'POST' })
                 showQRPanel()
             }
         }
