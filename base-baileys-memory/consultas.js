@@ -1,6 +1,6 @@
 async function obtenerCasosPendientes() {
     try {
-        const response = await fetch('http://3.16.114.54/api/notificaciones/casos_pendientes');
+        const response = await fetch('https://redcemed.com/api/notificaciones/casos_pendientes');
         const data = await response.json();
 
         if (data.error === 0 && data.response && data.response.data) {
@@ -17,7 +17,7 @@ async function obtenerCasosPendientes() {
 
 async function gestionarNotificacion(id) {
     try {
-        const response = await fetch('http://3.16.114.54/api/hojas-vida/notificacion/gestionar', {
+        const response = await fetch('https://redcemed.com/api/hojas-vida/notificacion/gestionar', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
@@ -38,7 +38,7 @@ async function gestionarNotificacion(id) {
 
 async function buscarHojasVidaConIPS() {
     try {
-        const response = await fetch('http://3.16.114.54/api/hojas-vida/con-ips');
+        const response = await fetch('https://redcemed.com/api/hojas-vida/con-ips');
         const data = await response.json();
 
         if (data.error === 0 && data.response && data.response.hojas_vida) {
@@ -74,7 +74,7 @@ async function buscarHojasVidaConIPS() {
 
 async function updateStatusHojaVida(hojaVidaId, estado, detalle) {
     try {
-        const response = await fetch(`http://3.16.114.54/api/hojas-vida/${hojaVidaId}/estado`, {
+        const response = await fetch(`https://redcemed.com/api/hojas-vida/${hojaVidaId}/estado`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',

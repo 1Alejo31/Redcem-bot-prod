@@ -178,7 +178,7 @@ async function procesarContactos(sock) {
         }
 
         const { asunto, mensaje, ruta_documento_adjunto } = caso.notificacion;
-        const pdfUrl = `http://3.16.114.54/api/pdf/recibida/${path.basename(ruta_documento_adjunto)}`;
+        const pdfUrl = `https://redcemed.com/api/pdf/recibida/${path.basename(ruta_documento_adjunto)}`;
         const pdfFileName = path.basename(ruta_documento_adjunto);
         const tempPdfPath = path.resolve(__dirname, `temp_${casoId}_${Date.now()}.pdf`);
 
